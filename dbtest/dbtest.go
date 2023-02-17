@@ -191,7 +191,11 @@ func buildObject(obj *Object) (interface{}, error) {
 			}
 			val := reflect.ValueOf(v)
 			if !val.Type().AssignableTo(f.Type()) {
-				return nil, fmt.Errorf("field '%s' can't be assigned the provided value, type mismatch", k)
+				if val.Type().ConvertibleTo(f.Type()) {
+					val = val.Convert(f.Type())
+				} else {
+					return nil, fmt.Errorf("field '%s' can't be assigned the provided value, type mismatch", k)
+				}
 			}
 			f.Set(val)
 		}
