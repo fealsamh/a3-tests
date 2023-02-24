@@ -67,6 +67,9 @@ tests:
 			    field2:
 			      type: int
 				  value: 2
+	  - type: SomeStruct
+		value: |
+			{"field1": "AString", "field2": 1234, "field3": {"field1": "abcd", "field2": 5678}, "field4": [1, 2, 3], "field5": [{"field1": "A", "field2": 1}, {"field1": "B", "field2": 2}]}
 	assert:
 	- query: SELECT 1
 	  rows:
@@ -86,9 +89,28 @@ tests:
 	arg := ts.Tests[0].Act.Arguments[1]
 	t.Log(arg)
 
-	obj, err := buildObject(&arg)
+	obj, err := BuildObject(&arg)
 	assert.Nil(err)
 	t.Logf("%+v (%T)", obj, obj)
+
+	assert.Equal("AString", obj.(*SomeStruct).Field1)
+	assert.Equal(1234, obj.(*SomeStruct).Field2)
+	assert.Equal(&AnotherStruct{Field1: "abcd", Field2: 5678}, obj.(*SomeStruct).Field3)
+	assert.Equal([]int{1, 2, 3}, obj.(*SomeStruct).Field4)
+	assert.Equal([]*AnotherStruct{{Field1: "A", Field2: 1}, {Field1: "B", Field2: 2}}, obj.(*SomeStruct).Field5)
+
+	arg = ts.Tests[0].Act.Arguments[2]
+	t.Log(arg)
+
+	obj, err = BuildObject(&arg)
+	assert.Nil(err)
+	t.Logf("%+v (%T)", obj, obj)
+
+	assert.Equal("AString", obj.(*SomeStruct).Field1)
+	assert.Equal(1234, obj.(*SomeStruct).Field2)
+	assert.Equal(&AnotherStruct{Field1: "abcd", Field2: 5678}, obj.(*SomeStruct).Field3)
+	assert.Equal([]int{1, 2, 3}, obj.(*SomeStruct).Field4)
+	assert.Equal([]*AnotherStruct{{Field1: "A", Field2: 1}, {Field1: "B", Field2: 2}}, obj.(*SomeStruct).Field5)
 }
 
 type SomeStruct struct {

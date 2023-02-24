@@ -3,6 +3,7 @@ package dbtest
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -100,13 +101,13 @@ func buildObjectFromMap(m map[string]interface{}) (interface{}, error) {
 	if !ok {
 		return nil, errors.New("expected 'value' in map")
 	}
-	return buildObject(&Object{
+	return BuildObject(&Object{
 		Type:  tn,
 		Value: val,
 	})
 }
 
-func buildObject(obj *Object) (interface{}, error) {
+func BuildObject(obj *Object) (interface{}, error) {
 	switch obj.Type {
 	case "context":
 		val, ok := obj.Value.(string)
@@ -172,34 +173,81 @@ func buildObject(obj *Object) (interface{}, error) {
 			return nil, fmt.Errorf("unknown custom type '%s'", obj.Type)
 		}
 		val, ok := obj.Value.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("type '%s' expects value of type 'map'", obj.Type)
-		}
-		inst := reflect.New(t).Elem()
-		for k, v := range val {
-			f := inst.FieldByName(strings.ToUpper(k[:1]) + k[1:])
-			if !f.IsValid() {
-				return nil, fmt.Errorf("field '%s' not found in type '%s'", k, obj.Type)
+		if ok {
+			inst := reflect.New(t).Elem()
+			for k, v := range val {
+				f := inst.FieldByName(strings.ToUpper(k[:1]) + k[1:])
+				if !f.IsValid() {
+					return nil, fmt.Errorf("field '%s' not found in type '%s'", k, obj.Type)
+				}
+				m, ok := v.(map[string]interface{})
+				if !ok {
+					return nil, fmt.Errorf("invalid value of field '%s', must be a map (is %T)", k, v)
+				}
+				v, err := buildObjectFromMap(m)
+				if err != nil {
+					return nil, err
+				}
+				val := reflect.ValueOf(v)
+				if !val.Type().AssignableTo(f.Type()) {
+					if val.Type().ConvertibleTo(f.Type()) {
+						val = val.Convert(f.Type())
+					} else {
+						return nil, fmt.Errorf("field '%s' can't be assigned the provided value, type mismatch", k)
+					}
+				}
+				f.Set(val)
 			}
-			m, ok := v.(map[string]interface{})
+			return inst.Addr().Interface(), nil
+		} else {
+			val, ok := obj.Value.(string)
 			if !ok {
-				return nil, fmt.Errorf("invalid value of field '%s', must be a map", k)
+				return nil, fmt.Errorf("type '%s' expects value of type 'map' or 'JSON string'", obj.Type)
 			}
-			v, err := buildObjectFromMap(m)
+			var m map[string]interface{}
+			if err := json.Unmarshal([]byte(val), &m); err != nil {
+				return nil, fmt.Errorf("type '%s', failed to unmarshal JSON (%s)", obj.Type, err)
+			}
+			return buildObjectFromJSON(t, m)
+		}
+	}
+}
+
+func buildObjectFromJSON(typ reflect.Type, m map[string]interface{}) (interface{}, error) {
+	inst := reflect.New(typ).Elem()
+	for k, v := range m {
+		f := inst.FieldByName(strings.ToUpper(k[:1]) + k[1:])
+		if !f.IsValid() {
+			return nil, fmt.Errorf("field '%s' not found in type '%s'", k, typ)
+		}
+		v, err := buildValueFromJSON(f.Type(), v)
+		if err != nil {
+			return nil, err
+		}
+		f.Set(reflect.ValueOf(v))
+	}
+	return inst.Addr().Interface(), nil
+}
+
+func buildValueFromJSON(typ reflect.Type, v interface{}) (interface{}, error) {
+	switch v := v.(type) {
+	case map[string]interface{}:
+		return buildObjectFromJSON(typ.Elem(), v)
+	case []interface{}:
+		s := reflect.MakeSlice(typ, len(v), len(v))
+		for i, v := range v {
+			v, err := buildValueFromJSON(typ.Elem(), v)
 			if err != nil {
 				return nil, err
 			}
-			val := reflect.ValueOf(v)
-			if !val.Type().AssignableTo(f.Type()) {
-				if val.Type().ConvertibleTo(f.Type()) {
-					val = val.Convert(f.Type())
-				} else {
-					return nil, fmt.Errorf("field '%s' can't be assigned the provided value, type mismatch", k)
-				}
-			}
-			f.Set(val)
+			s.Index(i).Set(reflect.ValueOf(v))
 		}
-		return inst.Addr().Interface(), nil
+		return s.Interface(), nil
+	default:
+		if !reflect.TypeOf(v).ConvertibleTo(typ) {
+			return nil, fmt.Errorf("expected value of/convertible to type '%s'", typ)
+		}
+		return reflect.ValueOf(v).Convert(typ).Interface(), nil
 	}
 }
 
@@ -245,7 +293,7 @@ func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error
 	args := make([]reflect.Value, len(t.Act.Arguments)+1)
 	args[0] = s
 	for i, obj := range t.Act.Arguments {
-		obj, err := buildObject(&obj)
+		obj, err := BuildObject(&obj)
 		if err != nil {
 			return err
 		}
@@ -299,7 +347,7 @@ func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error
 				expected := make([]interface{}, len(row.Columns))
 				actual := make([]interface{}, len(row.Columns))
 				for i, col := range cols {
-					expected[i], err = buildObject(&row.Columns[i])
+					expected[i], err = BuildObject(&row.Columns[i])
 					if err != nil {
 						return err
 					}
@@ -338,7 +386,7 @@ func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error
 			if len(r) != 2 {
 				return &TestError{name: t.Name, message: fmt.Sprintf("invalid number of return values of method '%s'", t.Act.Method)}
 			}
-			expected, err := buildObject(&ass.Value)
+			expected, err := BuildObject(&ass.Value)
 			if err != nil {
 				return err
 			}
