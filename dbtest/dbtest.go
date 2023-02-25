@@ -83,9 +83,26 @@ func RegisterTypes(objs ...interface{}) error {
 		if t.Kind() != reflect.Struct {
 			return errors.New("type must be a pointer to a structure")
 		}
-		customTypes[t.Name()] = t
+		registerType(t)
 	}
 	return nil
+}
+
+func registerType(t reflect.Type) {
+	if _, ok := customTypes[t.Name()]; ok {
+		return
+	}
+	customTypes[t.Name()] = t
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		t := f.Type
+		for t.Kind() == reflect.Pointer {
+			t = t.Elem()
+		}
+		if t.Kind() == reflect.Struct {
+			registerType(t)
+		}
+	}
 }
 
 func buildObjectFromMap(m map[string]interface{}) (interface{}, error) {
