@@ -96,7 +96,7 @@ func registerType(t reflect.Type) {
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		t := f.Type
-		for t.Kind() == reflect.Pointer {
+		for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
 			t = t.Elem()
 		}
 		if t.Kind() == reflect.Struct {
