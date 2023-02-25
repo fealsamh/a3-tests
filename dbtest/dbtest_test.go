@@ -83,7 +83,7 @@ tests:
 	assert.Nil(err)
 	t.Logf("%+v", ts)
 
-	err = RegisterTypes((*SomeStruct)(nil), (*AnotherStruct)(nil))
+	err = RegisterTypes((*SomeStruct)(nil))
 	assert.Nil(err)
 
 	arg := ts.Tests[0].Act.Arguments[1]
