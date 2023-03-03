@@ -89,10 +89,12 @@ func RegisterTypes(objs ...interface{}) error {
 }
 
 func registerType(t reflect.Type) {
-	if _, ok := customTypes[t.Name()]; ok {
+	comps := strings.Split(t.PkgPath(), "/")
+	key := comps[len(comps)-1] + "." + t.Name()
+	if _, ok := customTypes[key]; ok {
 		return
 	}
-	customTypes[t.Name()] = t
+	customTypes[key] = t
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		t := f.Type
@@ -182,7 +184,9 @@ func BuildObject(obj *Object) (interface{}, error) {
 		if obj.Type == "" {
 			return nil, errors.New("object type mustn't be empty")
 		}
-		if obj.Type[:1] != strings.ToUpper(obj.Type[:1]) {
+		comps := strings.Split(obj.Type, ".")
+		tname := comps[len(comps)-1]
+		if tname[:1] != strings.ToUpper(tname[:1]) {
 			return nil, fmt.Errorf("custom type '%s' doesn't begin with an uppercase letter", obj.Type)
 		}
 		t, ok := customTypes[obj.Type]
