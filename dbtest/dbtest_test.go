@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -83,8 +84,7 @@ tests:
 	assert.Nil(err)
 	t.Logf("%+v", ts)
 
-	err = RegisterTypes((*SomeStruct)(nil))
-	assert.Nil(err)
+	registerType(reflect.TypeOf((*SomeStruct)(nil)).Elem())
 
 	arg := ts.Tests[0].Act.Arguments[1]
 	t.Log(arg)
