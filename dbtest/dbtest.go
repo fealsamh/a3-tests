@@ -73,16 +73,38 @@ var (
 	customTypes = make(map[string]reflect.Type)
 )
 
-func RegisterTypes(objs ...interface{}) error {
-	for _, obj := range objs {
-		t := reflect.TypeOf(obj)
-		if t.Kind() != reflect.Pointer {
-			return errors.New("type must be a pointer to a structure")
-		}
+func registerServiceTypes(srv interface{}) error {
+	t := reflect.TypeOf(srv)
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
-		if t.Kind() != reflect.Struct {
-			return errors.New("type must be a pointer to a structure")
+	}
+	if t.Kind() != reflect.Struct {
+		return errors.New("service object not a structure")
+	}
+	t = reflect.PtrTo(t)
+	types := make(map[reflect.Type]struct{})
+	for i := 0; i < t.NumMethod(); i++ {
+		m := t.Method(i)
+		for j := 1; j < m.Type.NumIn(); j++ {
+			t := m.Type.In(j)
+			for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
+				t = t.Elem()
+			}
+			if t.Kind() == reflect.Struct {
+				types[t] = struct{}{}
+			}
 		}
+		for j := 0; j < m.Type.NumOut(); j++ {
+			t := m.Type.Out(j)
+			for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
+				t = t.Elem()
+			}
+			if t.Kind() == reflect.Struct {
+				types[t] = struct{}{}
+			}
+		}
+	}
+	for t := range types {
 		registerType(t)
 	}
 	return nil
@@ -284,6 +306,8 @@ func (ts *TestSet) Run(ctx context.Context, dbDsn string, service interface{}) e
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+
+	registerServiceTypes(service)
 
 	for _, t := range ts.Tests {
 		if err := t.Run(ctx, db, service); err != nil {
