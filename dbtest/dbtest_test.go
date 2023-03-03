@@ -22,7 +22,7 @@ tests:
 	  arguments:
 	  - type: context
 	    value: background
-	  - type: SomeStruct
+	  - type: dbtest.SomeStruct
 	    value:
 		  field1:
 		    type: string
@@ -31,7 +31,7 @@ tests:
 		    type: int
 			value: 1234
 		  field3:
-		    type: AnotherStruct
+		    type: dbtest.AnotherStruct
 			value:
 			  field1:
 			    type: string
@@ -51,7 +51,7 @@ tests:
 		  field5:
 			type: array
 			value:			
-		    - type: AnotherStruct
+		    - type: dbtest.AnotherStruct
 			  value:
 			    field1:
 			      type: string
@@ -59,7 +59,7 @@ tests:
 			    field2:
 			      type: int
 				  value: 1
-		    - type: AnotherStruct
+		    - type: dbtest.AnotherStruct
 			  value:
 			    field1:
 			      type: string
@@ -67,7 +67,7 @@ tests:
 			    field2:
 			      type: int
 				  value: 2
-	  - type: SomeStruct
+	  - type: dbtest.SomeStruct
 		value: |
 			{"field1": "AString", "field2": 1234, "field3": {"field1": "abcd", "field2": 5678}, "field4": [1, 2, 3], "field5": [{"field1": "A", "field2": 1}, {"field1": "B", "field2": 2}]}
 	assert:
