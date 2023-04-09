@@ -307,7 +307,9 @@ func (ts *TestSet) Run(ctx context.Context, dbDsn string, service interface{}) e
 		os.Exit(1)
 	}
 
-	registerServiceTypes(service)
+	if err := registerServiceTypes(service); err != nil {
+		return err
+	}
 
 	for _, t := range ts.Tests {
 		if err := t.Run(ctx, db, service); err != nil {
