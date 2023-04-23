@@ -148,6 +148,7 @@ func buildObjectFromMap(m map[string]interface{}) (interface{}, error) {
 	})
 }
 
+// BuildObject builds a native object.
 func BuildObject(obj *Object) (interface{}, error) {
 	switch obj.Type {
 	case "context":
@@ -242,7 +243,8 @@ func BuildObject(obj *Object) (interface{}, error) {
 				f.Set(val)
 			}
 			return inst.Addr().Interface(), nil
-		} else {
+		}
+		{
 			val, ok := obj.Value.(string)
 			if !ok {
 				return nil, fmt.Errorf("type '%s' expects value of type 'map' or 'JSON string'", obj.Type)
@@ -294,6 +296,7 @@ func buildValueFromJSON(typ reflect.Type, v interface{}) (interface{}, error) {
 	}
 }
 
+// Run runs a test set.
 func (ts *TestSet) Run(ctx context.Context, dbDsn string, service interface{}) error {
 	db, err := sql.Open("postgres", dbDsn)
 	if err != nil {
@@ -320,6 +323,7 @@ func (ts *TestSet) Run(ctx context.Context, dbDsn string, service interface{}) e
 	return nil
 }
 
+// Run runs a test.
 func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error {
 	for _, arr := range t.Arrange {
 		if _, err := db.ExecContext(ctx, arr.Statement); err != nil {
@@ -439,7 +443,14 @@ func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error
 			}
 			actual := r[0].Interface()
 			if !reflect.DeepEqual(expected, actual) {
-				return &TestError{name: t.Name, message: fmt.Sprintf("return values not equal: '%v' /= '%v'", expected, actual)}
+				return &TestError{
+					name:    t.Name,
+					message: fmt.Sprintf("return values not equal: '%v' /= '%v'", expected, actual),
+					data: map[string]interface{}{
+						"expected": expected,
+						"actual":   actual,
+					},
+				}
 			}
 		}
 	}
@@ -447,11 +458,19 @@ func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error
 	return nil
 }
 
+// TestError is a test error.
 type TestError struct {
 	name    string
 	message string
+	data    map[string]interface{}
 }
 
 func (te *TestError) Error() string {
 	return fmt.Sprintf("%s: %s", te.name, te.message)
+}
+
+// Data returns a value for the provided key.
+func (te *TestError) Data(key string) (interface{}, bool) {
+	v, ok := te.data[key]
+	return v, ok
 }
