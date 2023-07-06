@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"strings"
 
-	_ "github.com/lib/pq"
+	_ "github.com/lib/pq" // Postgres driver
 	"gopkg.in/yaml.v3"
 )
 
