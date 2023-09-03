@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"log"
 	"reflect"
 	"strings"
 
@@ -15,63 +15,75 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type (
-	// TestSet ...
-	TestSet struct {
-		Tests []DBTest `yaml:"tests"`
-	}
-
-	// DBTest ...
-	DBTest struct {
-		Name    string    `yaml:"name"`
-		Arrange []Arrange `yaml:"arrange"`
-		Act     Act       `yaml:"act"`
-		Assert  []Assert  `yaml:"assert"`
-	}
-
-	// Arrange ...
-	Arrange struct {
-		Statement string `yaml:"statement"`
-	}
-
-	// Act ...
-	Act struct {
-		Method    string   `yaml:"method"`
-		Arguments []Object `yaml:"arguments"`
-	}
-
-	// Assert ...
-	Assert struct {
-		Value Object `yaml:"value"`
-		Query string `yaml:"query"`
-		Rows  []Row  `yaml:"rows"`
-		Error string `yaml:"error"`
-	}
-
-	// Row ...
-	Row struct {
-		Columns []Object `yaml:"columns"`
-	}
-
-	// Object ...
-	Object struct {
-		Type  string      `yaml:"type"`
-		Value interface{} `yaml:"value"`
-	}
-)
-
-// Load ...
-func Load(r io.Reader) (*TestSet, error) {
-	var ts *TestSet
-	if err := yaml.NewDecoder(r).Decode(&ts); err != nil {
-		return nil, err
-	}
-	return ts, nil
+// TestSet holds an array of DBTest. This maps to the top-level 'tests' array in the YAML.
+type TestSet struct {
+	// Tests is an array of DBTest objects, each representing a database test to run.
+	Tests []DBTest `yaml:"tests"`
 }
 
-var (
-	customTypes = make(map[string]reflect.Type)
-)
+// DBTest encapsulates information about a single database test.
+type DBTest struct {
+	// Name is the name of the test, usually for logging and tracking.
+	Name string `yaml:"name"`
+	// Arrange contains SQL statements to be run before the test.
+	Arrange []Arrange `yaml:"arrange"`
+	// Act describes the method to call and its arguments during the test.
+	Act Act `yaml:"act"`
+	// Assert holds the information needed to verify the state of the database after the test.
+	Assert []Assert `yaml:"assert"`
+}
+
+// Arrange encapsulates a single SQL statement used to prepare the database for a test.
+type Arrange struct {
+	// Statement is the SQL command to be executed.
+	Statement string `yaml:"statement"`
+}
+
+// Act describes the method to call and its arguments.
+type Act struct {
+	// Method is the name of the method to call on the service under test.
+	Method string `yaml:"method"`
+	// Arguments is an array of objects, representing the arguments to pass to the method.
+	Arguments []Object `yaml:"arguments"`
+}
+
+// Assert contains information for making an assertion on the database state.
+type Assert struct {
+	// Value is used in some cases to assert that a method returns this value.
+	Value Object `yaml:"value"`
+	// Query is the SQL query used to fetch data for assertion.
+	Query string `yaml:"query"`
+	// Rows describe the expected rows returned by the Query.
+	Rows []Row `yaml:"rows"`
+	// Error holds an expected error message, if applicable.
+	Error string `yaml:"error"`
+}
+
+// Row encapsulates the expected columns for a row returned by a SQL query in an assertion.
+type Row struct {
+	// Columns is an array of Objects, each representing a column in a database row.
+	Columns []Object `yaml:"columns"`
+}
+
+// Object represents a generic value with a type.
+type Object struct {
+	// Type describes the type of the Object (e.g., "int", "string", "customStruct").
+	Type string `yaml:"type"`
+	// Value holds the actual value of the Object.
+	Value interface{} `yaml:"value"`
+}
+
+// Load reads from an io.Reader and attempts to decode the content into a TestSet object.
+// It returns the populated TestSet object and any error encountered during decoding.
+func Load(r io.Reader) (*TestSet, error) {
+	var tests *TestSet
+	if err := yaml.NewDecoder(r).Decode(&tests); err != nil {
+		return nil, err
+	}
+	return tests, nil
+}
+
+var customTypes = make(map[string]reflect.Type)
 
 func registerServiceTypes(srv interface{}) error {
 	t := reflect.TypeOf(srv)
@@ -148,7 +160,7 @@ func buildObjectFromMap(m map[string]interface{}) (interface{}, error) {
 	})
 }
 
-// BuildObject builds a native object.
+// BuildObject constructs an object based on the provided Object structure, handling different data types and custom types.
 func BuildObject(obj *Object) (interface{}, error) {
 	switch obj.Type {
 	case "context":
@@ -178,7 +190,7 @@ func BuildObject(obj *Object) (interface{}, error) {
 			return nil, fmt.Errorf("type '%s' expects value of type 'array of maps' which mustn't be empty", obj.Type)
 		}
 		objs := make([]interface{}, len(val))
-		var eltype reflect.Type
+		var elementType reflect.Type
 		for i, el := range val {
 			el, ok := el.(map[string]interface{})
 			if !ok {
@@ -190,15 +202,15 @@ func BuildObject(obj *Object) (interface{}, error) {
 			}
 			t := reflect.TypeOf(obj)
 			if i == 0 {
-				eltype = t
+				elementType = t
 			} else {
-				if t != eltype {
+				if t != elementType {
 					return nil, errors.New("type mismatch in array")
 				}
 			}
 			objs[i] = obj
 		}
-		s := reflect.MakeSlice(reflect.SliceOf(eltype), len(objs), len(objs))
+		s := reflect.MakeSlice(reflect.SliceOf(elementType), len(objs), len(objs))
 		for i, el := range objs {
 			s.Index(i).Set(reflect.ValueOf(el))
 		}
@@ -208,8 +220,8 @@ func BuildObject(obj *Object) (interface{}, error) {
 			return nil, errors.New("object type mustn't be empty")
 		}
 		comps := strings.Split(obj.Type, ".")
-		tname := comps[len(comps)-1]
-		if tname[:1] != strings.ToUpper(tname[:1]) {
+		typeName := comps[len(comps)-1]
+		if typeName[:1] != strings.ToUpper(typeName[:1]) {
 			return nil, fmt.Errorf("custom type '%s' doesn't begin with an uppercase letter", obj.Type)
 		}
 		t, ok := customTypes[obj.Type]
@@ -296,25 +308,37 @@ func buildValueFromJSON(typ reflect.Type, v interface{}) (interface{}, error) {
 	}
 }
 
-// Run runs a test set.
+// Run executes all the tests in a TestSet.
+// It takes a context, a database DSN (Data Source Name), and a service interface containing the methods to be tested.
 func (ts *TestSet) Run(ctx context.Context, dbDsn string, service interface{}) error {
+
+	// Open a new database connection.
 	db, err := sql.Open("postgres", dbDsn)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
-	defer db.Close()
 
+	// Make sure to close the database connection when the function returns.
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	// Ping the database to ensure we're connected.
 	if err := db.Ping(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
+	// Register the types in the service for use in reflection-based operations.
 	if err := registerServiceTypes(service); err != nil {
 		return err
 	}
 
+	// Iterate through each test in the TestSet and run it.
 	for _, t := range ts.Tests {
+		// Run each test and return an error if any test fails.
 		if err := t.Run(ctx, db, service); err != nil {
 			return err
 		}
@@ -323,7 +347,7 @@ func (ts *TestSet) Run(ctx context.Context, dbDsn string, service interface{}) e
 	return nil
 }
 
-// Run runs a test.
+// Run executes a DBTest. This function uses reflection to call methods dynamically and run SQL statements.
 func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error {
 	for _, arr := range t.Arrange {
 		if _, err := db.ExecContext(ctx, arr.Statement); err != nil {
@@ -354,107 +378,109 @@ func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error
 	err := r[m.Type.NumOut()-1].Interface()
 
 	for _, ass := range t.Assert {
-		if err != nil && ass.Error == "" {
-			err, ok := err.(error)
-			if !ok {
-				return fmt.Errorf("last return value of '%s' isn't an error", m.Name)
-			}
-			return &TestError{name: t.Name, message: "unexpected error: " + err.Error()}
-		}
 
-		switch {
-		case ass.Error != "":
-			if err == nil {
-				return &TestError{name: t.Name, message: "expected error"}
-			}
-			err, ok := err.(error)
-			if !ok {
-				return fmt.Errorf("last return value of '%s' isn't an error", m.Name)
-			}
-			if err.Error() != ass.Error {
-				return &TestError{name: t.Name, message: fmt.Sprintf("different error: '%s' /= '%s'", ass.Error, err.Error())}
-			}
+		return func() error {
 
-		case ass.Query != "":
-			rows, err := db.QueryContext(ctx, ass.Query)
-			if err != nil {
-				return err
-			}
-			defer rows.Close()
-			var i int
-			for rows.Next() {
-				if i >= len(ass.Rows) {
-					return &TestError{name: t.Name, message: "less rows expected"}
+			if err != nil && ass.Error == "" {
+				err, ok := err.(error)
+				if !ok {
+					return fmt.Errorf("last return value of '%s' isn't an error", m.Name)
 				}
-				row := ass.Rows[i]
-				i++
-				cols, err := rows.ColumnTypes()
+				return &TestError{name: t.Name, message: "unexpected error: " + err.Error()}
+			}
+
+			switch {
+			case ass.Error != "":
+				if err == nil {
+					return &TestError{name: t.Name, message: "expected error"}
+				}
+				err, ok := err.(error)
+				if !ok {
+					return fmt.Errorf("last return value of '%s' isn't an error", m.Name)
+				}
+				if err.Error() != ass.Error {
+					return &TestError{name: t.Name, message: fmt.Sprintf("different error: '%s' /= '%s'", ass.Error, err.Error())}
+				}
+
+			case ass.Query != "":
+				rows, err := db.QueryContext(ctx, ass.Query)
 				if err != nil {
 					return err
 				}
-				if len(row.Columns) != len(cols) {
-					return &TestError{name: t.Name, message: "invalid number of columns"}
-				}
-				expected := make([]interface{}, len(row.Columns))
-				actual := make([]interface{}, len(row.Columns))
-				for i, col := range cols {
-					expected[i], err = BuildObject(&row.Columns[i])
+				defer func() {
+					err := rows.Close()
+					if err != nil {
+						log.Fatal(err)
+					}
+				}()
+				var i int
+				for rows.Next() {
+					if i >= len(ass.Rows) {
+						return &TestError{name: t.Name, message: "less rows expected"}
+					}
+					row := ass.Rows[i]
+					i++
+					cols, err := rows.ColumnTypes()
 					if err != nil {
 						return err
 					}
-					actual[i] = reflect.New(col.ScanType()).Interface()
-				}
-				if err := rows.Scan(actual...); err != nil {
-					return err
-				}
-				for i, val := range expected {
-					a := actual[i]
-					v1 := reflect.ValueOf(a)
-					v2 := reflect.ValueOf(val)
-					if v1.Kind() == reflect.Pointer && v2.Kind() != reflect.Pointer {
-						v1 = v1.Elem()
-						a = v1.Interface()
+					if len(row.Columns) != len(cols) {
+						return &TestError{name: t.Name, message: "invalid number of columns"}
 					}
-					if v1.Type() != v2.Type() {
-						if v1.Type().ConvertibleTo(v2.Type()) {
-							a = v1.Convert(v2.Type()).Interface()
-						} else {
-							return &TestError{name: t.Name, message: fmt.Sprintf("incompatible types of field '%s'", cols[i].Name())}
+					expected := make([]interface{}, len(row.Columns))
+					actual := make([]interface{}, len(row.Columns))
+					for i, col := range cols {
+						expected[i], err = BuildObject(&row.Columns[i])
+						if err != nil {
+							return err
+						}
+						actual[i] = reflect.New(col.ScanType()).Interface()
+					}
+					if err := rows.Scan(actual...); err != nil {
+						return err
+					}
+					for i, val := range expected {
+						a := actual[i]
+						v1 := reflect.ValueOf(a)
+						v2 := reflect.ValueOf(val)
+						if v1.Kind() == reflect.Pointer && v2.Kind() != reflect.Pointer {
+							v1 = v1.Elem()
+							a = v1.Interface()
+						}
+						if v1.Type() != v2.Type() {
+							if v1.Type().ConvertibleTo(v2.Type()) {
+								a = v1.Convert(v2.Type()).Interface()
+							} else {
+								return &TestError{name: t.Name, message: fmt.Sprintf("incompatible types of field '%s'", cols[i].Name())}
+							}
+						}
+						if !reflect.DeepEqual(val, a) {
+							return &TestError{name: t.Name, message: fmt.Sprintf("values of field '%s' not equal: '%v' /= '%v'", cols[i].Name(), val, a)}
 						}
 					}
-					if !reflect.DeepEqual(val, a) {
-						return &TestError{name: t.Name, message: fmt.Sprintf("values of field '%s' not equal: '%v' /= '%v'", cols[i].Name(), val, a)}
-					}
+				}
+				if err := rows.Err(); err != nil {
+					return err
+				}
+				if i < len(ass.Rows) {
+					return &TestError{name: t.Name, message: "more rows expected"}
+				}
+			default:
+				if len(r) != 2 {
+					return &TestError{name: t.Name, message: fmt.Sprintf("invalid number of return values of method '%s'", t.Act.Method)}
+				}
+				expected, err := BuildObject(&ass.Value)
+				if err != nil {
+					return err
+				}
+				actual := r[0].Interface()
+				if !reflect.DeepEqual(expected, actual) {
+					return &TestError{name: t.Name, message: fmt.Sprintf("return values not equal: '%v' /= '%v'", expected, actual)}
 				}
 			}
-			if err := rows.Err(); err != nil {
-				return err
-			}
-			if i < len(ass.Rows) {
-				return &TestError{name: t.Name, message: "more rows expected"}
-			}
-		default:
-			if len(r) != 2 {
-				return &TestError{name: t.Name, message: fmt.Sprintf("invalid number of return values of method '%s'", t.Act.Method)}
-			}
-			expected, err := BuildObject(&ass.Value)
-			if err != nil {
-				return err
-			}
-			actual := r[0].Interface()
-			if !reflect.DeepEqual(expected, actual) {
-				return &TestError{
-					name:    t.Name,
-					message: fmt.Sprintf("return values not equal: '%v' /= '%v'", expected, actual),
-					data: map[string]interface{}{
-						"expected": expected,
-						"actual":   actual,
-					},
-				}
-			}
-		}
+			return nil
+		}()
 	}
-
 	return nil
 }
 
@@ -465,6 +491,7 @@ type TestError struct {
 	data    map[string]interface{}
 }
 
+// Error returns the error formatted as a string.
 func (te *TestError) Error() string {
 	return fmt.Sprintf("%s: %s", te.name, te.message)
 }
