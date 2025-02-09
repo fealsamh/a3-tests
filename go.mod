@@ -1,6 +1,6 @@
 module github.com/fealsamh/a3-tests
 
-go 1.18
+go 1.22
 
 require (
 	github.com/lib/pq v1.10.9
