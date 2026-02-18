@@ -84,7 +84,7 @@ tests:
 	assert.Nil(err)
 	t.Logf("%+v", ts)
 
-	registerType(reflect.TypeOf((*SomeStruct)(nil)).Elem())
+	registerType(reflect.TypeFor[SomeStruct]())
 
 	arg := ts.Tests[0].Act.Arguments[1]
 	t.Log(arg)
