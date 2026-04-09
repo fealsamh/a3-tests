@@ -55,8 +55,8 @@ type (
 
 	// Object ...
 	Object struct {
-		Type  string      `yaml:"type"`
-		Value interface{} `yaml:"value"`
+		Type  string `yaml:"type"`
+		Value any    `yaml:"value"`
 	}
 )
 
@@ -73,7 +73,7 @@ var (
 	customTypes = make(map[string]reflect.Type)
 )
 
-func registerServiceTypes(srv interface{}) error {
+func registerServiceTypes(srv any) error {
 	t := reflect.TypeOf(srv)
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -129,7 +129,7 @@ func registerType(t reflect.Type) {
 	}
 }
 
-func buildObjectFromMap(m map[string]interface{}) (interface{}, error) {
+func buildObjectFromMap(m map[string]any) (any, error) {
 	t, ok := m["type"]
 	if !ok {
 		return nil, errors.New("expected 'type' in map")
@@ -149,7 +149,7 @@ func buildObjectFromMap(m map[string]interface{}) (interface{}, error) {
 }
 
 // BuildObject builds a native object.
-func BuildObject(obj *Object) (interface{}, error) {
+func BuildObject(obj *Object) (any, error) {
 	switch obj.Type {
 	case "context":
 		val, ok := obj.Value.(string)
@@ -173,14 +173,14 @@ func BuildObject(obj *Object) (interface{}, error) {
 		}
 		return val, nil
 	case "array":
-		val, ok := obj.Value.([]interface{})
+		val, ok := obj.Value.([]any)
 		if !ok || len(val) == 0 {
 			return nil, fmt.Errorf("type '%s' expects value of type 'array of maps' which mustn't be empty", obj.Type)
 		}
-		objs := make([]interface{}, len(val))
+		objs := make([]any, len(val))
 		var eltype reflect.Type
 		for i, el := range val {
-			el, ok := el.(map[string]interface{})
+			el, ok := el.(map[string]any)
 			if !ok {
 				return nil, fmt.Errorf("type '%s' expects value of type 'array of maps' which mustn't be empty", obj.Type)
 			}
@@ -216,7 +216,7 @@ func BuildObject(obj *Object) (interface{}, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown custom type '%s'", obj.Type)
 		}
-		val, ok := obj.Value.(map[string]interface{})
+		val, ok := obj.Value.(map[string]any)
 		if ok {
 			inst := reflect.New(t).Elem()
 			for k, v := range val {
@@ -224,7 +224,7 @@ func BuildObject(obj *Object) (interface{}, error) {
 				if !f.IsValid() {
 					return nil, fmt.Errorf("field '%s' not found in type '%s'", k, obj.Type)
 				}
-				m, ok := v.(map[string]interface{})
+				m, ok := v.(map[string]any)
 				if !ok {
 					return nil, fmt.Errorf("invalid value of field '%s', must be a map (is %T)", k, v)
 				}
@@ -249,7 +249,7 @@ func BuildObject(obj *Object) (interface{}, error) {
 			if !ok {
 				return nil, fmt.Errorf("type '%s' expects value of type 'map' or 'JSON string'", obj.Type)
 			}
-			var m map[string]interface{}
+			var m map[string]any
 			if err := json.Unmarshal([]byte(val), &m); err != nil {
 				return nil, fmt.Errorf("type '%s', failed to unmarshal JSON (%s)", obj.Type, err)
 			}
@@ -258,7 +258,7 @@ func BuildObject(obj *Object) (interface{}, error) {
 	}
 }
 
-func buildObjectFromJSON(typ reflect.Type, m map[string]interface{}) (interface{}, error) {
+func buildObjectFromJSON(typ reflect.Type, m map[string]any) (any, error) {
 	inst := reflect.New(typ).Elem()
 	for k, v := range m {
 		f := inst.FieldByName(strings.ToUpper(k[:1]) + k[1:])
@@ -274,11 +274,11 @@ func buildObjectFromJSON(typ reflect.Type, m map[string]interface{}) (interface{
 	return inst.Addr().Interface(), nil
 }
 
-func buildValueFromJSON(typ reflect.Type, v interface{}) (interface{}, error) {
+func buildValueFromJSON(typ reflect.Type, v any) (any, error) {
 	switch v := v.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		return buildObjectFromJSON(typ.Elem(), v)
-	case []interface{}:
+	case []any:
 		s := reflect.MakeSlice(typ, len(v), len(v))
 		for i, v := range v {
 			v, err := buildValueFromJSON(typ.Elem(), v)
@@ -297,7 +297,7 @@ func buildValueFromJSON(typ reflect.Type, v interface{}) (interface{}, error) {
 }
 
 // Run runs a test set.
-func (ts *TestSet) Run(ctx context.Context, dbDsn string, service interface{}) error {
+func (ts *TestSet) Run(ctx context.Context, dbDsn string, service any) error {
 	db, err := sql.Open("postgres", dbDsn)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -324,7 +324,7 @@ func (ts *TestSet) Run(ctx context.Context, dbDsn string, service interface{}) e
 }
 
 // Run runs a test.
-func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error {
+func (t *DBTest) Run(ctx context.Context, db *sql.DB, service any) error {
 	for _, arr := range t.Arrange {
 		if _, err := db.ExecContext(ctx, arr.Statement); err != nil {
 			return err
@@ -395,8 +395,8 @@ func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error
 				if len(row.Columns) != len(cols) {
 					return &TestError{name: t.Name, message: "invalid number of columns"}
 				}
-				expected := make([]interface{}, len(row.Columns))
-				actual := make([]interface{}, len(row.Columns))
+				expected := make([]any, len(row.Columns))
+				actual := make([]any, len(row.Columns))
 				for i, col := range cols {
 					expected[i], err = BuildObject(&row.Columns[i])
 					if err != nil {
@@ -446,7 +446,7 @@ func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error
 				return &TestError{
 					name:    t.Name,
 					message: fmt.Sprintf("return values not equal: '%v' /= '%v'", expected, actual),
-					data: map[string]interface{}{
+					data: map[string]any{
 						"expected": expected,
 						"actual":   actual,
 					},
@@ -462,7 +462,7 @@ func (t *DBTest) Run(ctx context.Context, db *sql.DB, service interface{}) error
 type TestError struct {
 	name    string
 	message string
-	data    map[string]interface{}
+	data    map[string]any
 }
 
 func (te *TestError) Error() string {
@@ -470,7 +470,7 @@ func (te *TestError) Error() string {
 }
 
 // Data returns a value for the provided key.
-func (te *TestError) Data(key string) (interface{}, bool) {
+func (te *TestError) Data(key string) (any, bool) {
 	v, ok := te.data[key]
 	return v, ok
 }
